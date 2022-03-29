@@ -119,7 +119,68 @@ massiveRun {
 액터가 독점적으로 자료를 가지고 그 자료는 다른 코루틴과 공유하지 않고 액터를 통해서만 접근하게 만든다.<br>
 
 먼저 실드 클래스를 만들어서 시작해야한다.<br>
-실드(sealed) 클래스란? 외부에서 확장이 불가능한 클래스이다.
+
+~~~kotlin
+sealed class CounterMsg
+object IncCounter: CounterMsg()
+class GetCounter(val response: CompletableDeferred<Int>): CounterMsg()
+~~~
+
+1. 실드(sealed) 클래스란? 외부에서 확장이 불가능한 클래스이다.<br>
+2. IncCounter는 싱글톤으로 인스턴스를 만들 수 없다. 액터에게 값을 중가시키기 위한 신호로 쓰임.
+3. GetCounter는 값을 가져올 때 쓰며 `CompletableDeferred<Int>`를 이용해 값을 받아온다.
+4. CounterMsg는 액터에게 보내기 위함이다. IncCounter와 GetCounter로 보내는 신호가 2가지이다.
+
+~~~kotlin
+fun main() = runBlocking {
+    val counter = counterActor()
+    withContext(Dispatchers.Default) {
+        massiveRun {
+            counter.send(IncCounter)
+        }
+    }
+    
+    val response = CompletableDeferred<Int>()
+    counter.send(GetCounter(response))
+    println(response.await())
+    counter.colse
+}
+
+suspend fun massiveRun(action: suspend() -> Unit) {
+    val n = 100
+    val k = 10000
+    val elapsed = measureTimeMillis {
+        coroutineScope {
+            repeat(n) {
+                launch {
+                    repeat(k) { action() }
+                }
+            }
+        }
+    }
+    println("$elapsed ms동안 ${n * k}개의 액션을 수행했습니다.")
+}
+
+sealed class CounterMsg
+object IncCounter: CounterMsg()
+class GetCounter(val response: CompletableDeferred<Int>): CounterMsg()
+
+
+fun CoroutineScope.counterActor() = actor<CounterMsg> {
+    var counter = 0 // 액터 안에 상태를 캡슐화해두고 다른 코루틴이 접근하지 못하게 한다.
+    
+    for(msg in channel) { // 외부에서 보내는 것은 채널을 통해서만 받을 수 있다.
+        when(msg) {
+            is IncCounter -> counter++ // 증가
+            is GetCounter -> msg.response.complete(counter) // 현재 상태 반환
+        }
+    }
+}
+~~~
+
+액터는 자료를 공유하는게 아니고 관리하는 액터를 만든후 그 액터에게 신호를 보내 원하는 결과를 얻게하는 자료구조이다.
+
+
 
 
 
